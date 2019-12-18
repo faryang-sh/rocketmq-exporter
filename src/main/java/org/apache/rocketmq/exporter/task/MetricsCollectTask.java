@@ -261,11 +261,12 @@ public class MetricsCollectTask {
             throw Throwables.propagate(err);
         }
     }
-    private void collectLatencyMetrcisInner(String topic,String group,String masterAddr, BrokerData bd) throws Exception {
+    public void collectLatencyMetrcisInner(String topic,String group,String masterAddr, BrokerData bd) throws Exception {
         long maxLagTime = 0;
         String statsKey;
         BrokerStatsData bsd = null;
         ConsumeStats consumeStatus = mqAdminExt.examineConsumeStats(group, topic);
+        // 返回每个queue的最近情况,包括 broker 、 consumer 的队列的偏移量
         Set<Map.Entry<MessageQueue, OffsetWrapper>> consumeStatusEntries = consumeStatus.getOffsetTable().entrySet();
         for (Map.Entry<MessageQueue, OffsetWrapper> consumeStatusEntry : consumeStatusEntries) {
             MessageQueue q = consumeStatusEntry.getKey();
@@ -279,16 +280,20 @@ public class MetricsCollectTask {
                 log.info("error is " + e.getMessage());
             }
             MQAdminExtImpl mqAdminImpl = (MQAdminExtImpl) mqAdminExt;
+            // 获取队列中最近一次消费的 offset的 PullResult
             PullResult consumePullResult = mqAdminImpl.queryMsgByOffset(q, offset.getConsumerOffset());
             long lagTime = 0;
-            if (consumePullResult != null && consumePullResult.getPullStatus() == PullStatus.FOUND) {
+            // 根据结果来计算时间，PullStatus用来表示查询消息的结果
+            if (consumePullResult != null && consumePullResult.getPullStatus() == PullStatus.FOUND) { // 如果找到消息
+                // 该条消息消费时间与当前时间的差值
                 lagTime = System.currentTimeMillis() - consumePullResult.getMsgFoundList().get(0).getStoreTimestamp();
+                // 如果broker的offset和consumer的offset相等，说明没有延迟，也即是0
                 if (offset.getBrokerOffset() == offset.getConsumerOffset()) {
                     lagTime = 0;
                 }
-            } else if (consumePullResult.getPullStatus() == PullStatus.NO_MATCHED_MSG) {
+            } else if (consumePullResult.getPullStatus() == PullStatus.NO_MATCHED_MSG) {    // 找不到消息
                 lagTime = 0;
-            } else if (consumePullResult.getPullStatus() == PullStatus.OFFSET_ILLEGAL) {
+            } else if (consumePullResult.getPullStatus() == PullStatus.OFFSET_ILLEGAL) {    // 偏移量非法(太大或者太小的情况下)
                 PullResult pullResult = mqAdminImpl.queryMsgByOffset(q, consumePullResult.getMinOffset());
                 if (pullResult != null && pullResult.getPullStatus() == PullStatus.FOUND) {
                     lagTime = System.currentTimeMillis() - consumePullResult.getMsgFoundList().get(0).getStoreTimestamp();
